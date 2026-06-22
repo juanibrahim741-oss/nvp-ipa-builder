@@ -1,8 +1,8 @@
 name: Produce CoreML shards (NVP-D)
 
-# Produces CoreML model artifacts on the macOS runner (coremltools) for the
-# distributed NVP Beta. Stage 1 = a palettized whole-model .mlmodelc; multi-shard
-# split is iterated on top. Run manually (Run workflow) with an optional model id.
+# Splits a model into CoreML shards on the macOS runner and publishes them as a
+# GitHub Release so the coordinator can auto-register them in NVP-D and the
+# iPhones can download them. Caches the HF model + pip wheels to run faster.
 on:
   workflow_dispatch:
     inputs:
@@ -16,7 +16,7 @@ on:
         default: "4"
 
 permissions:
-  contents: read
+  contents: write # create the release with the shard assets
 
 jobs:
   shards:
@@ -26,22 +26,28 @@ jobs:
       MODEL_ID: ${{ github.event.inputs.model_id }}
       NUM_SHARDS: ${{ github.event.inputs.num_shards }}
       OUT_DIR: ${{ github.workspace }}/build_shards
+      HF_HUB_ENABLE_HF_TRANSFER: "1" # faster model download
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python (with pip cache)
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: shards/requirements.txt
+
+      - name: Cache Hugging Face model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-${{ github.event.inputs.model_id }}
 
       - name: Install deps
         run: |
           python -m venv "$RUNNER_TEMP/venv"
           "$RUNNER_TEMP/venv/bin/pip" install --quiet --upgrade pip
-          # Pin a coremltools-tested torch (2.12 breaks conversion) + numpy<2.
-          "$RUNNER_TEMP/venv/bin/pip" install --quiet \
-            "torch==2.5.1" "transformers==4.46.3" "coremltools==8.1" "numpy<2" \
-            "accelerate>=0.26.0" "scikit-learn==1.5.1" "sentencepiece" "protobuf"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet -r shards/requirements.txt
 
       - name: Convert to CoreML
         run: |
@@ -58,7 +64,33 @@ jobs:
           done
           ls -la
 
-      - name: Upload shard artifacts
+      - name: Package release assets (zip each shard + tokenizer + manifest)
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/release_assets"
+          cd "$OUT_DIR" || exit 0
+          for d in shard_*.mlmodelc; do
+            [ -e "$d" ] || continue
+            ditto -c -k --sequesterRsrc --keepParent "$d" "$GITHUB_WORKSPACE/release_assets/${d}.zip"
+          done
+          [ -d tokenizer ] && ditto -c -k --keepParent tokenizer "$GITHUB_WORKSPACE/release_assets/tokenizer.zip" || true
+          cp manifest.json "$GITHUB_WORKSPACE/release_assets/" 2>/dev/null || true
+          ls -la "$GITHUB_WORKSPACE/release_assets"
+
+      - name: Compute release tag
+        run: |
+          slug=$(echo "$MODEL_ID" | tr '/' '-' | tr '[:upper:]' '[:lower:]')
+          echo "TAG=shards-$slug" >> "$GITHUB_ENV"
+
+      - name: Publish shards as a Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: "NVP-D shards — ${{ env.MODEL_ID }}"
+          body: "CoreML shards for ${{ env.MODEL_ID }} (${{ env.NUM_SHARDS }} shards). Auto-published for NVP-D."
+          files: release_assets/*
+          fail_on_unmatched_files: false
+
+      - name: Upload build artifacts (debug)
         uses: actions/upload-artifact@v4
         with:
           name: nvp-coreml-shards
