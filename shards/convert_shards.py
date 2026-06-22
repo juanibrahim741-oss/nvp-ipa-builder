@@ -91,15 +91,20 @@ def convert(module, example, in_name, in_dtype, out_name, path):
         compute_units=ct.ComputeUnit.ALL,
         minimum_deployment_target=ct.target.iOS17,
     )
-    ml = palettize(ml, 4)
+    try:
+        ml = palettize(ml, 4)
+    except Exception as e:
+        print(f"  palettize skipped ({e}); saving unquantized", flush=True)
     ml.save(path)
 
 
 def main():
     print(f"Loading {MODEL_ID} (fp16, low-mem) …", flush=True)
     cfg = AutoConfig.from_pretrained(MODEL_ID)
+    # bfloat16 (not float16): Llama ships in bf16; fp16's smaller range turns some
+    # weights into inf, which then breaks k-means palettization.
     model = AutoModelForCausalLM.from_pretrained(
-        MODEL_ID, torch_dtype=torch.float16, low_cpu_mem_usage=True, attn_implementation="eager"
+        MODEL_ID, torch_dtype=torch.bfloat16, low_cpu_mem_usage=True, attn_implementation="eager"
     )
     model.config.use_cache = False
     model.eval()
