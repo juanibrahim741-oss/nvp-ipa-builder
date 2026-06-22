@@ -68,7 +68,10 @@ struct NetworkView: View {
                     // Live activity panel
                     activityCard
 
-                    Text("v0: each job runs fully on one device. Splitting one model across devices comes in v2.")
+                    // NVP-D split mode: download distributed-model shards (animated)
+                    NexusDownloadView()
+
+                    Text("Split mode (NVP-D) distributes one model across devices. Download a model's shards above to join.")
                         .font(.caption2).foregroundColor(Theme.muted).multilineTextAlignment(.center)
                 }
                 .padding()

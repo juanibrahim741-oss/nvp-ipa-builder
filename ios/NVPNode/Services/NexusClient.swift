@@ -95,4 +95,14 @@ final class NexusClient {
               let http = resp as? HTTPURLResponse, http.statusCode == 200 else { return nil }
         return (try? JSONSerialization.jsonObject(with: out)) as? [String: Any]
     }
+
+    /// All distributed models registered on the network (id + manifest + updatedAt).
+    func manifests() async -> [[String: Any]] {
+        guard let url = URL(string: baseURL + "/api/nexus/manifest") else { return [] }
+        guard let (out, resp) = try? await session.data(from: url),
+              let http = resp as? HTTPURLResponse, http.statusCode == 200,
+              let obj = try? JSONSerialization.jsonObject(with: out) as? [String: Any],
+              let arr = obj["manifests"] as? [[String: Any]] else { return [] }
+        return arr
+    }
 }
