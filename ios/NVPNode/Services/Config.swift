@@ -119,13 +119,13 @@ enum Config {
         return mb * 1024 * 1024
     }
 
-    /// Max tokens the worker will generate for one job. Capped so the KV cache
-    /// stays bounded (we also 8-bit quantize + cap the KV cache in the engine).
-    static let maxTokensCap = 1024
+    /// Max tokens the worker will generate for one job. Higher = longer answers /
+    /// agent steps; the engine 8-bit quantizes + caps the KV cache to stay bounded.
+    static let maxTokensCap = 4096
     /// Default when a job doesn't specify one.
-    static let defaultMaxTokens = 512
+    static let defaultMaxTokens = 2048
     /// How many jobs the worker pre-fetches into its local queue.
-    static let maxQueueDepth = 4
+    static let maxQueueDepth = 6
 
     // MARK: - NVP crypto (Base Sepolia testnet)
     /// JSON-RPC endpoint for the NVP chain.
