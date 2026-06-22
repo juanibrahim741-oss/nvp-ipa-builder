@@ -32,6 +32,12 @@ packages:
   WalletCore:
     url: https://github.com/trustwallet/wallet-core
     from: "4.2.9"
+  # swift-transformers — tokenizer for the NVP-D distributed pipeline.
+  # Version aligned with mlx-swift-lm (1.2.x) so SPM resolves a single copy.
+  swift-transformers:
+    url: https://github.com/huggingface/swift-transformers
+    minVersion: "1.2.0"
+    maxVersion: "1.3.0"
 
 targets:
   NVPNode:
@@ -54,6 +60,8 @@ targets:
         product: MLX
       - package: Swift-gemma4-core
         product: Gemma4SwiftCore
+      - package: swift-transformers
+        product: Tokenizers
       - package: WalletCore
         product: WalletCore
       - package: WalletCore
