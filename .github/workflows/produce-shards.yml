@@ -35,9 +35,10 @@ jobs:
           python -m venv "$RUNNER_TEMP/venv"
           "$RUNNER_TEMP/venv/bin/pip" install --quiet --upgrade pip
           # Pin a coremltools-tested torch (2.12 breaks conversion) + numpy<2.
+          # transformers 4.51.x recognizes newer archs (Qwen3, etc.); 4.46 did not.
           # scikit-learn pinned to <=1.5.1 (coremltools 8.1 rejects newer for k-means).
           "$RUNNER_TEMP/venv/bin/pip" install --quiet \
-            "torch==2.5.1" "transformers==4.46.3" "coremltools==8.1" "numpy<2" \
+            "torch==2.5.1" "transformers==4.51.3" "coremltools==8.1" "numpy<2" \
             "scikit-learn==1.5.1" "sentencepiece" "protobuf"
 
       - name: Convert to CoreML
