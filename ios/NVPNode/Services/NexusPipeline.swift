@@ -12,17 +12,7 @@ import Tokenizers
 /// Runtime correctness depends on real multi-shard `.mlmodelc` files + on-device
 /// validation; this is the compiling beta scaffold of the full pipeline.
 
-/// Finds locally-available shard models (bundled in Models/<modelId>/ or cached).
-enum NexusShardStore {
-    static func shardURL(modelId: String, shard: Int) -> URL? {
-        guard let res = Bundle.main.resourceURL else { return nil }
-        let candidates = [
-            res.appendingPathComponent("Models/\(modelId)/shard_\(shard).mlmodelc"),
-            res.appendingPathComponent("Models/shard_\(shard).mlmodelc"),
-        ]
-        return candidates.first { FileManager.default.fileExists(atPath: $0.path) }
-    }
-}
+// NexusShardStore lives in NexusShards.swift (store + downloader).
 
 /// Serializes/deserializes the relay payload for a tensor (base64 of ActivationTensor JSON).
 private enum Wire {
@@ -103,7 +93,9 @@ actor NexusPipeline {
 
     private func loadTokenizer(modelId: String) async -> Tokenizer? {
         if let t = tokenizer { return t }
-        // Prefer a bundled tokenizer dir, else download by HF id.
+        // Prefer the downloaded shard tokenizer, then a bundled one, else HF.
+        if let dir = NexusShardStore.tokenizerDir(modelId),
+           let t = try? await AutoTokenizer.from(modelFolder: dir) { tokenizer = t; return t }
         if let res = Bundle.main.resourceURL {
             let dir = res.appendingPathComponent("Models/\(modelId)/tokenizer")
             if FileManager.default.fileExists(atPath: dir.path),

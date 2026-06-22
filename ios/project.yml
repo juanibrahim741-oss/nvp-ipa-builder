@@ -38,6 +38,10 @@ packages:
     url: https://github.com/huggingface/swift-transformers
     minVersion: "1.2.0"
     maxVersion: "1.3.0"
+  # ZIPFoundation — unzip the CoreML shard archives downloaded for NVP-D split mode.
+  ZIPFoundation:
+    url: https://github.com/weichsel/ZIPFoundation
+    from: "0.9.0"
 
 targets:
   NVPNode:
@@ -62,6 +66,8 @@ targets:
         product: Gemma4SwiftCore
       - package: swift-transformers
         product: Tokenizers
+      - package: ZIPFoundation
+        product: ZIPFoundation
       - package: WalletCore
         product: WalletCore
       - package: WalletCore
