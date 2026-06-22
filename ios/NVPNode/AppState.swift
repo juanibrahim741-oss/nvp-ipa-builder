@@ -50,6 +50,11 @@ final class AppState: ObservableObject {
     @Published var walletBetaEnabled = false // wallet beta allowed (admin)
     @Published var nvpBetaOn = Config.nvpBetaEnabled // user joined distributed compute
     @Published var nexusPeerCount = 0 // peers online in the NVP-D network
+    @Published var nvpServedModels: [String] = [] // NVP-D models this device has shards for
+    @Published var nvpPowerTops = 0 // rough Neural Engine TOPS estimate
+    private var nvpModelShards: [String: Int] = [:] // model id → shard count
+    private var nexusWorker: NexusWorker? // serves shard steps to peers (NVP mode)
+    private var nvpJobLoop: Task<Void, Never>? // claims + runs NVP-D jobs (NVP mode)
     private let nexus = NexusClient()
     private var nvpBaselineSet = false // first settings poll establishes baseline
     private var dlLastMB: Double = 0
@@ -202,9 +207,17 @@ final class AppState: ObservableObject {
     func setNvpBeta(_ on: Bool) {
         Config.nvpBetaEnabled = on
         nvpBetaOn = on
-        nvpLog(.info, on ? "NVP Beta ON — joining distributed compute network" : "NVP Beta OFF")
-        if on {
-            Task { await api.nexusAnnounce(peerId: Config.peerId, deviceModel: UIDevice.current.model, ramGB: Config.deviceRamGB) }
+        nvpPowerTops = on ? estimateTops() : 0
+        nvpLog(.info, on ? "NVP Beta ON — distributed mode (local models disabled)" : "NVP Beta OFF — local mode")
+        // If the worker is running, switch it into/out of NVP mode immediately.
+        if isWorker {
+            Task {
+                await stopLoop(); await stopNVPMode()
+                if on { startNVPMode() } else { startLoop() }
+            }
+        } else if on {
+            Task { await api.nexusAnnounce(peerId: Config.peerId, deviceModel: UIDevice.current.model, ramGB: Config.deviceRamGB)
+                   await refreshServedModels() }
         }
     }
 
@@ -312,7 +325,104 @@ final class AppState: ObservableObject {
         // inference aren't cancelled by auto-lock / backgrounding.
         UIApplication.shared.isIdleTimerDisabled = on
         nvpLog(.info, on ? "Worker turned ON (screen kept awake)" : "Worker turned OFF")
-        if on { startLoop() } else { Task { await stopLoop() } }
+        if on {
+            // NVP mode: serve/run distributed shards ONLY (no local MLX model).
+            if nvpBetaOn { startNVPMode() } else { startLoop() }
+        } else {
+            Task { await stopLoop(); await stopNVPMode() }
+        }
+    }
+
+    /// Rough Neural Engine throughput (TOPS) for the power display.
+    private func estimateTops() -> Int {
+        let gb = Config.deviceRamGB
+        if gb >= 7.5 { return 35 } else if gb >= 5.5 { return 17 } else { return 11 }
+    }
+
+    /// NVP-D worker mode: serve shard steps to peers + claim/run NVP-D jobs locally
+    /// via the CoreML pipeline. The local MLX model is NOT loaded in this mode.
+    private func startNVPMode() {
+        status = "NVP mode"
+        nvpPowerTops = estimateTops()
+        nvpLog(.success, "NVP-D mode ON — serving distributed shards (local model disabled)")
+        let worker = NexusWorker(modelId: "")
+        nexusWorker = worker
+        Task { await worker.start() }
+        heartbeatTask = Task { [weak self] in
+            while !Task.isCancelled { await self?.api.heartbeat(); try? await Task.sleep(nanoseconds: 20_000_000_000) }
+        }
+        nvpJobLoop = Task { [weak self] in await self?.runNVPLoop() }
+    }
+
+    private func stopNVPMode() async {
+        nvpJobLoop?.cancel(); nvpJobLoop = nil
+        heartbeatTask?.cancel(); heartbeatTask = nil
+        await nexusWorker?.stop(); nexusWorker = nil
+        if status == "NVP mode" { status = "idle" }
+        activity = .idle
+    }
+
+    /// Refresh which distributed models this device can serve (shards installed).
+    func refreshServedModels() async {
+        let raw = await nexus.manifests()
+        var served: [String] = []
+        var shardsMap: [String: Int] = [:]
+        for e in raw {
+            guard let id = e["modelId"] as? String else { continue }
+            let man = e["manifest"] as? [String: Any] ?? [:]
+            let shards = (man["shards"] as? [[String: Any]])?.count ?? 0
+            if shards > 0, NexusShardStore.installedShardCount(modelId: id, total: shards) == shards {
+                served.append(id); shardsMap[id] = shards
+            }
+        }
+        nvpServedModels = served
+        nvpModelShards = shardsMap
+    }
+
+    private func runNVPLoop() async {
+        while !Task.isCancelled {
+            guard isWorker, nvpBetaOn else { break }
+            await refreshServedModels()
+            // Announce capability (RAM + served shards) to the discovery registry.
+            await nexus.announce(peerId: Config.peerId, deviceName: UIDevice.current.model,
+                                 ramGB: Config.deviceRamGB, shards: Array(0..<(nvpModelShards.values.max() ?? 0)))
+            let served = nvpServedModels
+            if served.isEmpty { activity = .waiting; try? await Task.sleep(nanoseconds: 3_000_000_000); continue }
+            do {
+                activity = .waiting
+                if let job = try await api.nextJob(models: served) {
+                    activity = .receivedJob
+                    nvpLog(.info, "NVP job \(job.jobId) for \(job.model)")
+                    let shards = nvpModelShards[job.model] ?? 1
+                    let maxTokens = min(Config.maxTokensCap, job.params?.maxTokens ?? Config.defaultMaxTokens)
+                    let t0 = Date()
+                    activity = .inferring
+                    let output = await runNVP(modelId: job.model, prompt: job.prompt, shards: shards, maxTokens: maxTokens)
+                    let ms = Int(Date().timeIntervalSince(t0) * 1000)
+                    activity = .submitting
+                    let res = try await api.submitResult(jobId: job.jobId, output: output, latencyMs: ms, tokensOut: max(1, output.count / 4))
+                    nvpLog(res.accepted ? .success : .warn, res.accepted ? "NVP result accepted" : "NVP result rejected")
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+            }
+        }
+    }
+
+    /// Run one NVP-D inference locally across the device's shards via the pipeline.
+    private func runNVP(modelId: String, prompt: String, shards: Int, maxTokens: Int) async -> String {
+        let pipeline = NexusPipeline()
+        let local = NexusWorkerLocal(modelId: modelId)
+        let idx = Array(0..<max(1, shards))
+        var assignment: [Int: String] = [:]
+        for i in idx { assignment[i] = Config.peerId }
+        let stream = await pipeline.run(prompt: prompt, modelId: modelId, shardIndices: idx,
+                                        assignment: assignment, local: local, maxTokens: maxTokens)
+        var out = ""
+        for await piece in stream { out += piece }
+        return out
     }
 
     private func startLoop() {

@@ -29,7 +29,6 @@ private enum Wire {
 actor NexusWorker {
     private let client: NexusClient
     private let peerId: String
-    private var executors: [Int: CoreMLShardExecutor] = [:]
     private var running = false
     private var modelId: String
 
@@ -44,13 +43,17 @@ actor NexusWorker {
     }
     func stop() { running = false }
 
-    private func executor(for shard: Int) async -> CoreMLShardExecutor? {
-        if let e = executors[shard] { return e }
+    private var execByKey: [String: CoreMLShardExecutor] = [:]
+
+    /// Executor for a given model+shard (serves any model the device has shards for).
+    private func executor(modelId: String, shard: Int) async -> CoreMLShardExecutor? {
+        let key = "\(modelId)#\(shard)"
+        if let e = execByKey[key] { return e }
         guard let url = NexusShardStore.shardURL(modelId: modelId, shard: shard) else { return nil }
         let e = CoreMLShardExecutor(shardIndex: shard, url: url)
         try? await e.load()
         guard await e.isLoaded else { return nil }
-        executors[shard] = e
+        execByKey[key] = e
         return e
     }
 
@@ -65,7 +68,7 @@ actor NexusWorker {
                       let tStr = p["tensor"] as? String,
                       let tensor = Wire.decode(tStr),
                       let input = tensor.toMultiArray(),
-                      let exec = await executor(for: shard) else { continue }
+                      let exec = await executor(modelId: (p["modelId"] as? String) ?? modelId, shard: shard) else { continue }
                 let inputName = (p["input"] as? String) ?? (shard == 0 ? "input_ids" : "hidden_states")
                 guard let out = try? await exec.forward([inputName: input]) else { continue }
                 // Forward the first output tensor (hidden_states or logits) back.

@@ -91,36 +91,7 @@ struct WorkerView: View {
                         }
                     }
                     Divider().background(Color.white.opacity(0.06))
-                    let installed = ModelStore.isInstalled(Config.effectiveModelId)
-                    HStack(spacing: 10) {
-                        Image(systemName: installed ? "checkmark.circle.fill" : "arrow.down.circle")
-                            .foregroundColor(installed ? Theme.green : Theme.gold)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(Config.effectiveModelId).font(.subheadline)
-                                .foregroundColor(installed ? Theme.green : Theme.text)
-                            if app.isPreloading {
-                                Text(app.loadingIntoMemory
-                                     ? "Loading into memory… (1-2 min)"
-                                     : String(format: "%.0f / %.0f MB · %.1f MB/s", app.downloadMB, app.downloadTotalMB, app.downloadSpeedMBs))
-                                    .font(.caption2).foregroundColor(Theme.muted)
-                            } else if installed {
-                                Text(String(format: "Downloaded ✓ · %.1f GB", ModelStore.sizeOnDiskGB(Config.effectiveModelId)))
-                                    .font(.caption2).foregroundColor(Theme.green)
-                            } else {
-                                Text("Not downloaded").font(.caption2).foregroundColor(Theme.muted)
-                            }
-                        }
-                        Spacer()
-                        if !app.isPreloading {
-                            Button(installed ? "Launch" : "Download") { app.preloadModel(Config.workerModelId) }
-                                .font(.footnote).bold().foregroundColor(Theme.onAccent)
-                                .padding(.horizontal, 14).padding(.vertical, 7)
-                                .background(installed ? Theme.green : Theme.accent).clipShape(Capsule())
-                        }
-                    }
-                    if app.isPreloading {
-                        ProgressView(value: app.loadingIntoMemory ? 1 : app.loadProgress).tint(Theme.gold)
-                    }
+                    if app.nvpBetaOn { nvpStatus } else { localModelStatus }
                 }
                 .card()
 
@@ -149,6 +120,73 @@ struct WorkerView: View {
             }
             .padding()
         }
+    }
+
+    // Local (single-device) model status — shown only when NVP mode is OFF.
+    private var localModelStatus: some View {
+        let installed = ModelStore.isInstalled(Config.effectiveModelId)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: installed ? "checkmark.circle.fill" : "arrow.down.circle")
+                    .foregroundColor(installed ? Theme.green : Theme.gold)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(Config.effectiveModelId).font(.subheadline)
+                        .foregroundColor(installed ? Theme.green : Theme.text)
+                    if app.isPreloading {
+                        Text(app.loadingIntoMemory
+                             ? "Loading into memory… (1-2 min)"
+                             : String(format: "%.0f / %.0f MB · %.1f MB/s", app.downloadMB, app.downloadTotalMB, app.downloadSpeedMBs))
+                            .font(.caption2).foregroundColor(Theme.muted)
+                    } else if installed {
+                        Text(String(format: "Downloaded ✓ · %.1f GB", ModelStore.sizeOnDiskGB(Config.effectiveModelId)))
+                            .font(.caption2).foregroundColor(Theme.green)
+                    } else {
+                        Text("Not downloaded").font(.caption2).foregroundColor(Theme.muted)
+                    }
+                }
+                Spacer()
+                if !app.isPreloading {
+                    Button(installed ? "Launch" : "Download") { app.preloadModel(Config.workerModelId) }
+                        .font(.footnote).bold().foregroundColor(Theme.onAccent)
+                        .padding(.horizontal, 14).padding(.vertical, 7)
+                        .background(installed ? Theme.green : Theme.accent).clipShape(Capsule())
+                }
+            }
+            if app.isPreloading {
+                ProgressView(value: app.loadingIntoMemory ? 1 : app.loadProgress).tint(Theme.gold)
+            }
+        }
+    }
+
+    // NVP-D mode status — distributed only; local model is disabled.
+    private var nvpStatus: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "point.3.connected.trianglepath.dotted").foregroundColor(Theme.gold)
+                Text("Mode NVP-D actif").font(.subheadline).bold().foregroundColor(Theme.gold)
+                Spacer()
+                Text("Modèle local désactivé").font(.caption2).foregroundColor(Theme.muted)
+            }
+            HStack(spacing: 10) {
+                nvpMetric("\(app.nvpPowerTops)", "TOPS")
+                nvpMetric(String(format: "%.0f", Config.deviceRamGB), "GB RAM")
+                nvpMetric("\(app.nexusPeerCount)", "pairs")
+                nvpMetric("\(app.nvpServedModels.count)", "modèles")
+            }
+            Text("Le worker sert et exécute uniquement des shards NVP-D. Préparez les modèles distribués dans l'onglet Network.")
+                .font(.caption2).foregroundColor(Theme.muted)
+        }
+    }
+
+    private func nvpMetric(_ value: String, _ label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value).font(.headline).foregroundColor(Theme.text)
+            Text(label).font(.caption2).foregroundColor(Theme.muted)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(Color.white.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     private var thermalLabel: String {
