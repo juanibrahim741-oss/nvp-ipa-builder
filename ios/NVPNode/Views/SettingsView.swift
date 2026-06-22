@@ -119,7 +119,7 @@ struct SettingsView: View {
                         if app.nvpBetaOn {
                             HStack(spacing: 6) {
                                 Image(systemName: "point.3.connected.trianglepath.dotted").foregroundColor(Theme.gold)
-                                Text(String(format: "Announced to network · ~%.0f GB sharable", Config.deviceRamGB * 0.5))
+                                Text(String(format: "Connected · %d peer(s) · ~%.0f GB sharable", app.nexusPeerCount, Config.deviceRamGB * 0.5))
                                     .font(.caption2).foregroundColor(Theme.gold)
                             }
                         }

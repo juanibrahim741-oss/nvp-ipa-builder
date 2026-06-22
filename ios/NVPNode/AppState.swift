@@ -49,6 +49,8 @@ final class AppState: ObservableObject {
     @Published var nvpEnabled = false // NVP split protocol active (admin)
     @Published var walletBetaEnabled = false // wallet beta allowed (admin)
     @Published var nvpBetaOn = Config.nvpBetaEnabled // user joined distributed compute
+    @Published var nexusPeerCount = 0 // peers online in the NVP-D network
+    private let nexus = NexusClient()
     private var nvpBaselineSet = false // first settings poll establishes baseline
     private var dlLastMB: Double = 0
     private var dlLastTime: Date?
@@ -184,13 +186,12 @@ final class AppState: ObservableObject {
                         self.nvpBaselineSet = true
                     }
                 }
-                // NVP Beta: keep this device announced in the distributed registry.
-                if Config.nvpBetaEnabled {
-                    await self?.api.nexusAnnounce(
-                        peerId: Config.peerId,
-                        deviceModel: await MainActor.run { UIDevice.current.model },
-                        ramGB: Config.deviceRamGB,
-                    )
+                // NVP Beta: announce this device + count peers in the network.
+                if Config.nvpBetaEnabled, let self {
+                    let name = await MainActor.run { UIDevice.current.model }
+                    await self.nexus.announce(peerId: Config.peerId, deviceName: name, ramGB: Config.deviceRamGB, shards: [])
+                    let peers = await self.nexus.peers()
+                    await MainActor.run { self.nexusPeerCount = peers.count }
                 }
                 try? await Task.sleep(nanoseconds: 4_000_000_000)
             }
