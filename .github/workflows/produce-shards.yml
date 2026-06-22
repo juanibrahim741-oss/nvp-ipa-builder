@@ -11,6 +11,10 @@ on:
         description: "HF model id (ungated)"
         required: false
         default: "unsloth/Llama-3.2-1B-Instruct"
+      num_shards:
+        description: "Shards to split into (1 = whole model)"
+        required: false
+        default: "1"
 
 permissions:
   contents: write # publish the shard Release
@@ -18,9 +22,10 @@ permissions:
 jobs:
   shards:
     runs-on: macos-15
-    timeout-minutes: 90
+    timeout-minutes: 120
     env:
       MODEL_ID: ${{ github.event.inputs.model_id }}
+      NUM_SHARDS: ${{ github.event.inputs.num_shards }}
       OUT_DIR: ${{ github.workspace }}/build_shards
     steps:
       - uses: actions/checkout@v4

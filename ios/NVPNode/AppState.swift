@@ -379,13 +379,22 @@ final class AppState: ObservableObject {
         nvpModelShards = shardsMap
     }
 
+    /// "<modelId>:<shard>" tokens for every shard this device has on disk.
+    private func myShardTokens() -> [String] {
+        var tokens: [String] = []
+        for (id, n) in nvpModelShards {
+            for i in 0..<n where NexusShardStore.shardURL(modelId: id, shard: i) != nil { tokens.append("\(id):\(i)") }
+        }
+        return tokens
+    }
+
     private func runNVPLoop() async {
         while !Task.isCancelled {
             guard isWorker, nvpBetaOn else { break }
             await refreshServedModels()
-            // Announce capability (RAM + served shards) to the discovery registry.
+            // Announce capability (RAM + the exact shards we hold) to the registry.
             await nexus.announce(peerId: Config.peerId, deviceName: UIDevice.current.model,
-                                 ramGB: Config.deviceRamGB, shards: Array(0..<(nvpModelShards.values.max() ?? 0)))
+                                 ramGB: Config.deviceRamGB, shards: myShardTokens())
             let served = nvpServedModels
             if served.isEmpty { activity = .waiting; try? await Task.sleep(nanoseconds: 3_000_000_000); continue }
             do {
@@ -411,13 +420,40 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Run one NVP-D inference locally across the device's shards via the pipeline.
+    /// Assign each shard of `modelId` to a peer that holds it, spreading shards
+    /// across remote peers (round-robin) for a real multi-device split, falling
+    /// back to this device when no peer serves a given shard.
+    private func buildAssignment(modelId: String, shards: Int) async -> (assignment: [Int: String], remote: Int) {
+        let me = Config.peerId
+        let peers = await nexus.peers()
+        var assignment: [Int: String] = [:]
+        var rr = 0
+        var remoteCount = 0
+        for i in 0..<max(1, shards) {
+            let token = "\(modelId):\(i)"
+            let holders = peers.filter { $0.shards.contains(token) }.map { $0.peerId }
+            let remote = holders.filter { $0 != me }
+            let haveLocal = NexusShardStore.shardURL(modelId: modelId, shard: i) != nil
+            if !remote.isEmpty {
+                assignment[i] = remote[rr % remote.count]; rr += 1; remoteCount += 1
+            } else if haveLocal {
+                assignment[i] = me
+            } else if let any = holders.first {
+                assignment[i] = any; remoteCount += 1
+            } else {
+                assignment[i] = me // best effort
+            }
+        }
+        return (assignment, remoteCount)
+    }
+
+    /// Run one NVP-D inference, splitting the model's shards across peers + self.
     private func runNVP(modelId: String, prompt: String, shards: Int, maxTokens: Int) async -> String {
         let pipeline = NexusPipeline()
         let local = NexusWorkerLocal(modelId: modelId)
         let idx = Array(0..<max(1, shards))
-        var assignment: [Int: String] = [:]
-        for i in idx { assignment[i] = Config.peerId }
+        let (assignment, remote) = await buildAssignment(modelId: modelId, shards: shards)
+        nvpLog(.info, "Split: \(shards) shards · \(remote) on remote peers · \(shards - remote) local")
         let stream = await pipeline.run(prompt: prompt, modelId: modelId, shardIndices: idx,
                                         assignment: assignment, local: local, maxTokens: maxTokens)
         var out = ""

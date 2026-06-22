@@ -8,7 +8,8 @@ struct NexusPeer: Codable, Identifiable {
     var id: String { peerId }
     let peerId: String
     let capability: NexusCapability
-    let shards: [Int]
+    /// Per-model shard availability, encoded as "<modelId>:<shardIndex>" tokens.
+    let shards: [String]
     let ageSec: Double?
 
     enum CodingKeys: String, CodingKey { case peerId, capability, shards, ageSec }
@@ -59,8 +60,8 @@ final class NexusClient {
         return (try? JSONSerialization.jsonObject(with: out)) as? [String: Any]
     }
 
-    /// Announce this device's capability + the shard indices it can serve.
-    func announce(peerId: String, deviceName: String, ramGB: Double, shards: [Int]) async {
+    /// Announce this device's capability + the "<modelId>:<shard>" tokens it serves.
+    func announce(peerId: String, deviceName: String, ramGB: Double, shards: [String]) async {
         _ = await post([
             "action": "announce", "peer_id": peerId,
             "capability": ["deviceName": deviceName, "availableRAM_GB": ramGB, "platform": "ios"],

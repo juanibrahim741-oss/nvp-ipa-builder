@@ -88,10 +88,14 @@ actor NexusWorker {
 actor NexusPipeline {
     private let client: NexusClient
     private let peerId: String
+    /// Separate mailbox for shard results, so the orchestrator's own NexusWorker
+    /// (polling `peerId` for "step"s) never drains the pipeline's "result"s.
+    private let inbox: String
     private var tokenizer: Tokenizer?
 
     init(client: NexusClient = NexusClient(), peerId: String = Config.peerId) {
         self.client = client; self.peerId = peerId
+        self.inbox = peerId + "#orch"
     }
 
     private func loadTokenizer(modelId: String) async -> Tokenizer? {
@@ -147,7 +151,7 @@ actor NexusPipeline {
                     "job": UUID().uuidString, "shard": shard, "modelId": modelId,
                     "input": inputName, "tensor": Wire.encode(ActivationTensor.from(current)),
                 ]
-                await client.send(from: peerId, to: peer, kind: "step", payload: payload)
+                await client.send(from: inbox, to: peer, kind: "step", payload: payload)
                 guard let result = await awaitResult(shard: shard) else { return nil }
                 current = result
             }
@@ -158,7 +162,7 @@ actor NexusPipeline {
     private func awaitResult(shard: Int, timeoutMs: Int = 30_000) async -> MLMultiArray? {
         let deadline = Date().addingTimeInterval(Double(timeoutMs) / 1000)
         while Date() < deadline {
-            let msgs = await client.poll(peerId: peerId)
+            let msgs = await client.poll(peerId: inbox)
             for m in msgs where (m["kind"] as? String) == "result" {
                 if let p = m["payload"] as? [String: Any], (p["shard"] as? Int) == shard,
                    let s = p["tensor"] as? String, let t = Wire.decode(s) { return t.toMultiArray() }
