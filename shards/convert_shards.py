@@ -120,13 +120,14 @@ def main():
             if s == 0:
                 mod = Shard0(model, layers[lo:hi])
                 ex = torch.randint(0, cfg.vocab_size, (1, SEQ), dtype=torch.int32)
-                convert(mod, ex, "input_ids", np.int32, "hidden_states", path)
+                # CoreML forbids the same var name for input and output → "hidden_out".
+                convert(mod, ex, "input_ids", np.int32, "hidden_out", path)
                 in_shape, out_shape = [1, SEQ], [1, SEQ, H]
             else:
                 with_head = (s == n - 1)
                 mod = BlockShard(model, layers[lo:hi], with_head)
                 ex = torch.randn(1, SEQ, H, dtype=torch.float32)
-                convert(mod, ex, "hidden_states", np.float32, "logits" if with_head else "hidden_states", path)
+                convert(mod, ex, "hidden_states", np.float32, "logits" if with_head else "hidden_out", path)
                 in_shape, out_shape = [1, SEQ, H], ([1, SEQ, cfg.vocab_size] if with_head else [1, SEQ, H])
             shards_meta.append({"index": s, "layerRange": [lo, hi - 1], "file": f"shard_{s}.mlmodelc",
                                 "inputShape": in_shape, "outputShape": out_shape})

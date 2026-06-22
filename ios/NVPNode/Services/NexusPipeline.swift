@@ -79,7 +79,7 @@ actor NexusWorker {
                 let inputName = (p["input"] as? String) ?? (shard == 0 ? "input_ids" : "hidden_states")
                 guard let out = try? await exec.forward([inputName: input]) else { continue }
                 // Forward the first output tensor (hidden_states or logits) back.
-                if let first = out["hidden_states"] ?? out["logits"] ?? out.values.first {
+                if let first = out["logits"] ?? out["hidden_out"] ?? out["hidden_states"] ?? out.values.first {
                     let reply = ActivationTensor.from(first)
                     await client.send(from: peerId, to: from, kind: "result", payload: [
                         "job": p["job"] as? String ?? "", "shard": shard, "tensor": Wire.encode(reply),
@@ -208,6 +208,6 @@ actor NexusWorkerLocal {
             executors[shard] = exec
         }
         guard let out = try? await exec.forward([inputName: input]) else { return nil }
-        return out["hidden_states"] ?? out["logits"] ?? out.values.first
+        return out["logits"] ?? out["hidden_out"] ?? out["hidden_states"] ?? out.values.first
     }
 }
