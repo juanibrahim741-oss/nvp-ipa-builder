@@ -1,0 +1,84 @@
+name: iOS Unsigned IPA
+
+# Builds an UNSIGNED .ipa for iPhone WITHOUT bundling any models (small, fast).
+# The app uses CoreML shards / on-demand models at runtime. Runs on push to ios/**
+# or manually (Run workflow). Install via your own signing / sideloading.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios-unsigned-ipa.yml"
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      SCHEME: NVPNode
+      PROJECT: ios/NVPNode.xcodeproj
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Cache SwiftPM + DerivedData
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Developer/Xcode/DerivedData/NVPNode-*/SourcePackages
+            ~/Library/Caches/org.swift.swiftpm
+            ~/Library/Developer/Xcode/DerivedData/NVPNode-*/Build/Intermediates.noindex
+          key: ${{ runner.os }}-mlx-${{ hashFiles('ios/project.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-mlx-
+
+      - name: Resolve Swift packages
+        working-directory: ios
+        run: xcodebuild -project NVPNode.xcodeproj -resolvePackageDependencies
+
+      - name: Build unsigned archive
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/NVPNode.xcarchive" \
+            -skipPackagePluginValidation \
+            archive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO
+
+      - name: Package .ipa (unsigned)
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/NVPNode.xcarchive/Products/Applications/NVPNode.app"
+          if [ ! -d "$APP" ]; then echo "App not found at $APP"; ls -R "$RUNNER_TEMP/NVPNode.xcarchive/Products" || true; exit 1; fi
+          rm -rf "$RUNNER_TEMP/Payload"
+          mkdir -p "$RUNNER_TEMP/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/Payload/"
+          (cd "$RUNNER_TEMP" && zip -qry NVPNode-unsigned.ipa Payload)
+          echo "Built $(du -h "$RUNNER_TEMP/NVPNode-unsigned.ipa" | cut -f1) IPA"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NVPNode-unsigned-ipa
+          path: ${{ runner.temp }}/NVPNode-unsigned.ipa
+          if-no-files-found: error

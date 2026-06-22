@@ -1,0 +1,4 @@
+ios/Models/*
+!ios/Models/.gitkeep
+build_shards/
+*.mlpackage

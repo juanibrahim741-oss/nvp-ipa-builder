@@ -1,0 +1,4 @@
+# Placeholder so the `Models/` folder reference exists for XcodeGen.
+# Actual model weights (gemma3_1b, gemma4_e2b) are downloaded into this folder
+# at build time by the CI workflow and bundled into the IPA. They are never
+# committed (see .gitignore) — they are ~2.4 GB.

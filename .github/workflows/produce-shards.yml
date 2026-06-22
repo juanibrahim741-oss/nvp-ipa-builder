@@ -1,0 +1,60 @@
+name: Produce CoreML shards (NVP-D)
+
+# Produces CoreML model artifacts on the macOS runner (coremltools) for the
+# distributed NVP Beta. Stage 1 = a palettized whole-model .mlmodelc; multi-shard
+# split is iterated on top. Run manually (Run workflow) with an optional model id.
+on:
+  workflow_dispatch:
+    inputs:
+      model_id:
+        description: "HF model id (ungated)"
+        required: false
+        default: "unsloth/Llama-3.2-1B-Instruct"
+
+permissions:
+  contents: read
+
+jobs:
+  shards:
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      MODEL_ID: ${{ github.event.inputs.model_id }}
+      OUT_DIR: ${{ github.workspace }}/build_shards
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet --upgrade pip
+          # Pin a coremltools-tested torch (2.12 breaks conversion) + numpy<2.
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet \
+            "torch==2.5.1" "transformers==4.46.3" "coremltools==8.1" "numpy<2" "sentencepiece" "protobuf"
+
+      - name: Convert to CoreML
+        run: |
+          "$RUNNER_TEMP/venv/bin/python" shards/convert_shards.py
+          echo "--- build_shards ---"; ls -la "$OUT_DIR" || true
+
+      - name: Compile .mlpackage -> .mlmodelc
+        run: |
+          cd "$OUT_DIR" || exit 0
+          for pkg in *.mlpackage; do
+            [ -e "$pkg" ] || continue
+            echo "Compiling $pkg"
+            xcrun coremlcompiler compile "$pkg" .
+          done
+          ls -la
+
+      - name: Upload shard artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nvp-coreml-shards
+          path: ${{ env.OUT_DIR }}
+          if-no-files-found: warn
