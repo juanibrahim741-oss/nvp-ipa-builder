@@ -4,10 +4,12 @@ import SwiftUI
 /// the user download the CoreML shards needed to participate, with an animated
 /// progress ring + per-shard chips that light up as each shard installs.
 struct NexusDownloadView: View {
+    @EnvironmentObject var app: AppState
     @StateObject private var dl = NexusDownloadManager()
     @State private var models: [DistModel] = []
     @State private var active: String?
     @State private var loading = false
+    @State private var autoPrepared = false
 
     struct DistModel: Identifiable {
         let id: String        // modelId (hash)
@@ -28,9 +30,15 @@ struct NexusDownloadView: View {
                     .foregroundColor(Theme.muted)
             }
 
-            if models.isEmpty {
-                Text("No distributed models yet. Ask the admin to split one — it appears here automatically.")
+            if !app.nvpBetaOn {
+                Text("Activez le protocole NVP (Réglages) pour télécharger et utiliser les modèles distribués.")
                     .font(.caption).foregroundColor(Theme.muted)
+            } else if models.isEmpty {
+                Text("Aucun modèle distribué pour l'instant. L'admin doit en publier un — il apparaîtra ici automatiquement.")
+                    .font(.caption).foregroundColor(Theme.muted)
+            } else {
+                Text("Protocole NVP actif — préparation des modèles distribués.")
+                    .font(.caption2).foregroundColor(Theme.green)
             }
 
             ForEach(models) { m in
@@ -75,6 +83,7 @@ struct NexusDownloadView: View {
         }
         .card()
         .onAppear { Task { await load() } }
+        .onChange(of: app.nvpBetaOn) { _ in Task { await load() } }
     }
 
     private var progressRing: some View {
@@ -99,6 +108,12 @@ struct NexusDownloadView: View {
             return DistModel(id: id, name: name, shards: shards)
         }
         loading = false
+        // When the NVP protocol is active, automatically prepare (download) every
+        // distributed model that isn't installed yet — no manual tap needed.
+        if app.nvpBetaOn && !autoPrepared {
+            autoPrepared = true
+            for m in models where !m.ready { await download(m) }
+        }
     }
 
     @MainActor private func download(_ m: DistModel) async {
