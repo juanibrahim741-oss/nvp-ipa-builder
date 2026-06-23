@@ -109,9 +109,9 @@ final class NexusDownloadManager: ObservableObject {
 
     /// Returns the number of bytes downloaded (>0 on success), updating live metrics.
     private func fetchUnzip(_ url: URL, into dir: URL) async -> Int64 {
-        let delegate = ProgressDelegate { [weak self] taskBytes in
+        let delegate = ProgressDelegate { [weak self] written, expected in
             guard let self else { return }
-            Task { @MainActor in self.tick(self.baseBytes + taskBytes) }
+            Task { @MainActor in self.tick(written: written, expectedThisFile: expected) }
         }
         guard let (tmp, resp) = try? await session.download(from: url, delegate: delegate),
               let http = resp as? HTTPURLResponse, http.statusCode == 200 else { return 0 }
@@ -119,25 +119,33 @@ final class NexusDownloadManager: ObservableObject {
         return max(resp.expectedContentLength, delegate.lastBytes)
     }
 
-    private func tick(_ totalDownloaded: Int64) {
-        downloadedMB = Double(totalDownloaded) / 1_000_000
+    private func tick(written: Int64, expectedThisFile: Int64) {
+        let total = baseBytes + written
+        downloadedMB = Double(total) / 1_000_000
         let elapsed = Date().timeIntervalSince(startTime ?? Date())
         if elapsed > 0.3 { speedMBs = downloadedMB / elapsed }
-        let remain = max(0, totalMB - downloadedMB)
-        etaSec = speedMBs > 0.01 ? Int(remain / speedMBs) : 0
-        progress = totalMB > 0 ? min(1, downloadedMB / totalMB) : progress
+        if totalMB > 0 {
+            // Overall total known (HEAD sizes) → accurate progress + ETA.
+            let remain = max(0, totalMB - downloadedMB)
+            etaSec = speedMBs > 0.01 ? Int(remain / speedMBs) : 0
+            progress = min(1, downloadedMB / totalMB)
+        } else if expectedThisFile > 0 {
+            // Fallback: per-file fraction (when the server omits Content-Length).
+            progress = min(1, Double(written) / Double(expectedThisFile))
+            etaSec = 0
+        }
     }
 }
 
-/// URLSession download delegate that reports cumulative bytes for one task.
+/// URLSession download delegate: reports (bytes written, expected for this file).
 private final class ProgressDelegate: NSObject, URLSessionDownloadDelegate {
-    let onWrite: (Int64) -> Void
+    let onWrite: (Int64, Int64) -> Void
     var lastBytes: Int64 = 0
-    init(_ onWrite: @escaping (Int64) -> Void) { self.onWrite = onWrite }
+    init(_ onWrite: @escaping (Int64, Int64) -> Void) { self.onWrite = onWrite }
     func urlSession(_ s: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
                     totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
         lastBytes = totalBytesWritten
-        onWrite(totalBytesWritten)
+        onWrite(totalBytesWritten, totalBytesExpectedToWrite)
     }
     func urlSession(_ s: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {}
 }

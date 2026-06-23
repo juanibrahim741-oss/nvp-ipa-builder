@@ -77,7 +77,9 @@ struct NexusDownloadView: View {
                     }
                     if active == m.id && dl.busy {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(String(format: "%@ · %.0f / %.0f MB", dl.status, dl.downloadedMB, dl.totalMB))
+                            Text(dl.totalMB > 0
+                                 ? String(format: "%@ · %.0f / %.0f MB", dl.status, dl.downloadedMB, dl.totalMB)
+                                 : String(format: "%@ · %.0f MB", dl.status, dl.downloadedMB))
                                 .font(.caption2).foregroundColor(Theme.text)
                             Text(String(format: "%.1f MB/s%@", dl.speedMBs, dl.etaSec > 0 ? " · ~\(dl.etaSec)s restantes" : ""))
                                 .font(.caption2).foregroundColor(Theme.muted)

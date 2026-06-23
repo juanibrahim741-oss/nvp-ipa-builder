@@ -269,10 +269,11 @@ struct SettingsView: View {
             .task { try? await app.loadModels() }
             .sheet(isPresented: $showShare) { ShareSheet(items: shareItems) }
             .sheet(isPresented: $showWallet) { WalletView().environmentObject(app) }
-            .fileImporter(isPresented: $showFolderPicker, allowedContentTypes: [.folder], allowsMultipleSelection: false) { result in
-                if case .success(let urls) = result, let url = urls.first {
+            .sheet(isPresented: $showFolderPicker) {
+                FolderPicker { url in
                     try? StorageManager.setFolder(url)
                     storageName = StorageManager.displayName
+                    showFolderPicker = false
                 }
             }
         }
