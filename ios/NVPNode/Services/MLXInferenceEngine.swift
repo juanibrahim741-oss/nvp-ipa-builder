@@ -3,6 +3,7 @@ import MLX
 import MLXLLM
 import MLXLMCommon
 import Gemma4SwiftCore
+import Hub
 
 /// Real on-device inference via MLX Swift (mlx-swift-lm 2.30.x).
 ///
@@ -54,7 +55,11 @@ final class MLXInferenceEngine: InferenceEngine {
         }
 
         let handler = progressHandler
+        // Download into the user-chosen persistent folder when configured (survives
+        // uninstall); otherwise the default app cache.
+        let hub = StorageManager.modelsDir.map { HubApi(downloadBase: $0) } ?? HubApi()
         container = try await LLMModelFactory.shared.loadContainer(
+            hub: hub,
             configuration: configuration,
             progressHandler: { progress in
                 handler?(progress.fractionCompleted, progress.completedUnitCount, progress.totalUnitCount)

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// NVP-D "split mode" card: lists the distributed models on the network and lets
 /// the user download the CoreML shards needed to participate, with an animated
@@ -10,6 +11,7 @@ struct NexusDownloadView: View {
     @State private var active: String?
     @State private var loading = false
     @State private var autoPrepared = false
+    @State private var info: String = ""
 
     struct DistModel: Identifiable {
         let id: String        // modelId (hash)
@@ -81,9 +83,23 @@ struct NexusDownloadView: View {
                                 .font(.caption2).foregroundColor(Theme.muted)
                         }
                     }
+                    // Manual path: download via browser → move to folder → verify.
+                    HStack(spacing: 14) {
+                        Button { browser(m) } label: { Label("Navigateur", systemImage: "safari") }
+                            .font(.caption2).foregroundColor(Theme.gold)
+                        Button { Task { await load(); info = m.ready ? "✅ \(m.name) vérifié — prêt." : "⚠️ Shards manquants pour \(m.name) (\(m.installed)/\(m.shards))." } } label: {
+                            Label("Vérifier", systemImage: "checkmark.circle")
+                        }.font(.caption2).foregroundColor(Theme.green)
+                    }
                 }
                 .padding(.vertical, 6)
                 if m.id != models.last?.id { Divider().background(Theme.elev2) }
+            }
+
+            if !info.isEmpty {
+                Text(info).font(.caption2).foregroundColor(Theme.text)
+                    .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.elev2).clipShape(RoundedRectangle(cornerRadius: 10))
             }
         }
         .card()
@@ -128,5 +144,33 @@ struct NexusDownloadView: View {
         await dl.download(plan: plan)
         await load()
         active = nil
+    }
+
+    /// Open the model's GitHub Release in the browser + show move-to-folder steps.
+    private func browser(_ m: DistModel) {
+        Task {
+            let manifest = await NexusClient().manifest(modelId: m.id)
+            let shardURL = (manifest?["shards"] as? [[String: Any]])?.compactMap { $0["url"] as? String }.first
+            await MainActor.run {
+                if let page = shardURL.flatMap(releasePage), let u = URL(string: page) {
+                    UIApplication.shared.open(u)
+                } else if let s = shardURL, let u = URL(string: s) {
+                    UIApplication.shared.open(u)
+                } else {
+                    info = "Lien indisponible — relance la synchro côté admin."; return
+                }
+                let dest = "\(StorageManager.displayName)/nexus/\(m.id)"
+                info = "1) Télécharge les .zip depuis la page ouverte.\n2) Dans Fichiers, décompresse chaque .zip.\n3) Déplace les dossiers shard_*.mlmodelc et tokenizer dans :\n  \(dest)\n4) Appuie sur Vérifier."
+            }
+        }
+    }
+
+    /// `…/releases/download/<tag>/<file>` → `…/releases/tag/<tag>` (all assets).
+    private func releasePage(_ assetURL: String) -> String? {
+        guard let r = assetURL.range(of: "/releases/download/") else { return nil }
+        let prefix = assetURL[..<r.lowerBound]
+        let rest = assetURL[r.upperBound...]
+        guard let slash = rest.firstIndex(of: "/") else { return nil }
+        return "\(prefix)/releases/tag/\(rest[..<slash])"
     }
 }

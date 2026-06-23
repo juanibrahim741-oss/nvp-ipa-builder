@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @EnvironmentObject var app: AppState
@@ -12,11 +13,32 @@ struct SettingsView: View {
     @State private var linking = false
     @State private var walletOn = Config.walletBetaActive
     @State private var showWallet = false
+    // Persistent storage folder
+    @State private var showFolderPicker = false
+    @State private var storageName = StorageManager.displayName
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    // Persistent storage folder (survives uninstall)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Dossier de stockage").font(.headline).foregroundColor(Theme.text)
+                        Text("Choisissez un dossier (Fichiers / iCloud) où sont gardés les modèles locaux et les shards NVP. Les fichiers y restent même si vous désinstallez l'app — réinstallez puis re-choisissez ce dossier pour tout récupérer.")
+                            .font(.caption).foregroundColor(Theme.muted)
+                        HStack(spacing: 10) {
+                            Image(systemName: StorageManager.isConfigured ? "folder.fill" : "folder.badge.questionmark")
+                                .foregroundColor(StorageManager.isConfigured ? Theme.green : Theme.muted)
+                            Text(storageName).font(.subheadline).foregroundColor(Theme.text).lineLimit(1)
+                            Spacer()
+                            Button(StorageManager.isConfigured ? "Changer" : "Choisir") { showFolderPicker = true }
+                                .font(.footnote).bold().foregroundColor(Theme.onAccent)
+                                .padding(.horizontal, 14).padding(.vertical, 7)
+                                .background(Theme.accent).clipShape(Capsule())
+                        }
+                    }
+                    .card()
+
                     // On-device model (price, size, install status, download)
                     VStack(alignment: .leading, spacing: 8) {
                         Text("On-device model").font(.headline).foregroundColor(Theme.text)
@@ -247,6 +269,12 @@ struct SettingsView: View {
             .task { try? await app.loadModels() }
             .sheet(isPresented: $showShare) { ShareSheet(items: shareItems) }
             .sheet(isPresented: $showWallet) { WalletView().environmentObject(app) }
+            .fileImporter(isPresented: $showFolderPicker, allowedContentTypes: [.folder], allowsMultipleSelection: false) { result in
+                if case .success(let urls) = result, let url = urls.first {
+                    try? StorageManager.setFolder(url)
+                    storageName = StorageManager.displayName
+                }
+            }
         }
     }
 

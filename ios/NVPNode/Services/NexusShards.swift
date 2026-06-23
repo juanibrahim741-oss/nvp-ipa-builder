@@ -9,6 +9,8 @@ import ZIPFoundation
 /// caches so `NexusPipeline` / `NexusWorker` can run them.
 enum NexusShardStore {
     static var rootDir: URL {
+        // Prefer the user-chosen persistent folder (survives uninstall).
+        if let dir = StorageManager.nexusDir { return dir }
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         return caches.appendingPathComponent("nexus", isDirectory: true)

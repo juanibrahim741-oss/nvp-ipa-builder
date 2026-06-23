@@ -66,6 +66,8 @@ targets:
         product: Gemma4SwiftCore
       - package: swift-transformers
         product: Tokenizers
+      - package: swift-transformers
+        product: Hub
       - package: ZIPFoundation
         product: ZIPFoundation
       - package: WalletCore
