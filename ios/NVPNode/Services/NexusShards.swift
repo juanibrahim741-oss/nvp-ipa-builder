@@ -44,8 +44,15 @@ final class NexusDownloadManager: ObservableObject {
     @Published var installed = 0
     @Published var total = 0
     @Published var totalBytes: Int64 = 0
+    // Live metrics (what the user wants to see).
+    @Published var downloadedMB: Double = 0
+    @Published var totalMB: Double = 0
+    @Published var speedMBs: Double = 0
+    @Published var etaSec: Int = 0
 
     private let session = URLSession(configuration: .default)
+    private var baseBytes: Int64 = 0   // bytes from completed shards
+    private var startTime: Date?
 
     struct Plan { let modelId: String; let shards: [(index: Int, url: URL)]; let tokenizer: URL?; let bytes: Int64 }
 
@@ -74,32 +81,61 @@ final class NexusDownloadManager: ObservableObject {
         return n
     }
 
-    /// Download + unzip every shard (and the tokenizer) into the model's cache dir.
+    /// Download + unzip every shard (and the tokenizer) into the model's cache dir,
+    /// reporting live MB downloaded, speed (MB/s) and ETA.
     func download(plan: Plan) async {
         busy = true; status = "Downloading…"; installed = 0
-        total = plan.shards.count; totalBytes = plan.bytes; progress = 0
+        total = plan.shards.count; totalBytes = plan.bytes
+        totalMB = Double(plan.bytes) / 1_000_000
+        progress = 0; downloadedMB = 0; speedMBs = 0; etaSec = 0
+        baseBytes = 0; startTime = Date()
         let dir = NexusShardStore.modelDir(plan.modelId)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let steps = max(1, plan.shards.count + (plan.tokenizer != nil ? 1 : 0))
-        let unit = 1.0 / Double(steps)
         for (idx, url) in plan.shards {
-            status = "Shard \(idx + 1)/\(plan.shards.count)…"
-            if await fetchUnzip(url, into: dir) { installed += 1 }
-            progress = min(1, progress + unit)
+            status = "Shard \(idx + 1)/\(plan.shards.count)"
+            let bytes = await fetchUnzip(url, into: dir)
+            if bytes > 0 { installed += 1 }
+            baseBytes += max(bytes, 0)
         }
         if let t = plan.tokenizer {
-            status = "Tokenizer…"
-            _ = await fetchUnzip(t, into: dir)
-            progress = min(1, progress + unit)
+            status = "Tokenizer"
+            baseBytes += max(await fetchUnzip(t, into: dir), 0)
         }
-        progress = 1; busy = false
-        status = installed == total ? "Installed ✓" : "Incomplete (\(installed)/\(total))"
+        progress = 1; busy = false; speedMBs = 0; etaSec = 0
+        status = installed == total ? "Installé ✓" : "Incomplet (\(installed)/\(total))"
     }
 
-    private func fetchUnzip(_ url: URL, into dir: URL) async -> Bool {
-        guard let (tmp, resp) = try? await session.download(from: url),
-              let http = resp as? HTTPURLResponse, http.statusCode == 200 else { return false }
-        do { try FileManager.default.unzipItem(at: tmp, to: dir); return true }
-        catch { return false }
+    /// Returns the number of bytes downloaded (>0 on success), updating live metrics.
+    private func fetchUnzip(_ url: URL, into dir: URL) async -> Int64 {
+        let delegate = ProgressDelegate { [weak self] taskBytes in
+            guard let self else { return }
+            Task { @MainActor in self.tick(self.baseBytes + taskBytes) }
+        }
+        guard let (tmp, resp) = try? await session.download(from: url, delegate: delegate),
+              let http = resp as? HTTPURLResponse, http.statusCode == 200 else { return 0 }
+        do { try FileManager.default.unzipItem(at: tmp, to: dir) } catch { return 0 }
+        return max(resp.expectedContentLength, delegate.lastBytes)
     }
+
+    private func tick(_ totalDownloaded: Int64) {
+        downloadedMB = Double(totalDownloaded) / 1_000_000
+        let elapsed = Date().timeIntervalSince(startTime ?? Date())
+        if elapsed > 0.3 { speedMBs = downloadedMB / elapsed }
+        let remain = max(0, totalMB - downloadedMB)
+        etaSec = speedMBs > 0.01 ? Int(remain / speedMBs) : 0
+        progress = totalMB > 0 ? min(1, downloadedMB / totalMB) : progress
+    }
+}
+
+/// URLSession download delegate that reports cumulative bytes for one task.
+private final class ProgressDelegate: NSObject, URLSessionDownloadDelegate {
+    let onWrite: (Int64) -> Void
+    var lastBytes: Int64 = 0
+    init(_ onWrite: @escaping (Int64) -> Void) { self.onWrite = onWrite }
+    func urlSession(_ s: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
+                    totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+        lastBytes = totalBytesWritten
+        onWrite(totalBytesWritten)
+    }
+    func urlSession(_ s: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {}
 }

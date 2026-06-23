@@ -2,8 +2,11 @@ import SwiftUI
 
 struct WorkerView: View {
     @EnvironmentObject var app: AppState
+    @State private var showNVP = false
 
-    var body: some View { content }
+    var body: some View {
+        content.fullScreenCover(isPresented: $showNVP) { NVPBetaView().environmentObject(app) }
+    }
 
     private var bannerColor: Color {
         switch app.deviceState.statusBanner.color {
@@ -173,8 +176,14 @@ struct WorkerView: View {
                 nvpMetric("\(app.nexusPeerCount)", "pairs")
                 nvpMetric("\(app.nvpServedModels.count)", "modèles")
             }
-            Text("Le worker sert et exécute uniquement des shards NVP-D. Préparez les modèles distribués dans l'onglet Network.")
+            Text("Le worker sert et exécute uniquement des shards NVP-D.")
                 .font(.caption2).foregroundColor(Theme.muted)
+            Button { showNVP = true } label: {
+                HStack { Image(systemName: "rectangle.3.group.fill"); Text("Ouvrir NVP Beta") }
+                    .font(.subheadline).bold().foregroundColor(Theme.onAccent)
+                    .frame(maxWidth: .infinity).padding(.vertical, 10)
+                    .background(Theme.gold).clipShape(RoundedRectangle(cornerRadius: 12))
+            }
         }
     }
 

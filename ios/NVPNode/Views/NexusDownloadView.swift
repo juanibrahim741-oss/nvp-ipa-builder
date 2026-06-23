@@ -74,7 +74,12 @@ struct NexusDownloadView: View {
                         }
                     }
                     if active == m.id && dl.busy {
-                        Text(dl.status).font(.caption2).foregroundColor(Theme.muted)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(String(format: "%@ · %.0f / %.0f MB", dl.status, dl.downloadedMB, dl.totalMB))
+                                .font(.caption2).foregroundColor(Theme.text)
+                            Text(String(format: "%.1f MB/s%@", dl.speedMBs, dl.etaSec > 0 ? " · ~\(dl.etaSec)s restantes" : ""))
+                                .font(.caption2).foregroundColor(Theme.muted)
+                        }
                     }
                 }
                 .padding(.vertical, 6)
