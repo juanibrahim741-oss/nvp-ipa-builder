@@ -30,21 +30,24 @@ struct WorkerView: View {
                 }
                 .padding(.top, 8)
 
-                // Balance hero
-                VStack(spacing: 4) {
-                    Text("Total balance").font(.caption).foregroundColor(Theme.muted)
+                // Balance hero — deep-teal feature card (fintech identity)
+                VStack(spacing: 6) {
+                    Text("Available balance").font(.caption).foregroundColor(Theme.onTeal.opacity(0.7))
                     Text(Format.usd(app.balance))
-                        .font(.system(size: 44, weight: .heavy, design: .rounded))
-                        .foregroundColor(Theme.gold)
-                    Text("+\(Format.usd(app.creditsToday)) today")
-                        .font(.footnote).foregroundColor(Theme.green)
+                        .font(.system(size: 46, weight: .heavy, design: .rounded))
+                        .foregroundColor(Theme.onTeal)
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.up.right").font(.caption2)
+                        Text("+\(Format.usd(app.creditsToday)) today").font(.footnote.bold())
+                    }
+                    .foregroundColor(Theme.onAccent)
+                    .padding(.horizontal, 12).padding(.vertical, 5)
+                    .background(Theme.accent).clipShape(Capsule())
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 22)
-                .background(
-                    LinearGradient(colors: [Theme.elev2, Theme.elev], startPoint: .topLeading, endPoint: .bottomTrailing)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 18))
+                .padding(.vertical, 28)
+                .background(Theme.teal)
+                .clipShape(RoundedRectangle(cornerRadius: 28))
 
                 // Big toggle card
                 VStack(spacing: 14) {
