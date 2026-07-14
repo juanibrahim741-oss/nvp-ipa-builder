@@ -1,0 +1,79 @@
+name: NVP-D pre-split (shards)
+
+# Managed by the NVP coordinator — do not edit by hand (it is overwritten on
+# the next launch). Splits a source .gguf into tensor-aligned byte parts and
+# publishes them as a Release the NVP-D workers download their part from.
+on:
+  workflow_dispatch:
+    inputs:
+      gguf_url:
+        description: "Direct https URL to the source .gguf (public / non-gated)."
+        required: true
+      name:
+        description: "Human-readable model name (slugified for the release tag)."
+        required: true
+      parts:
+        description: "Minimum number of parts (grows automatically to fit the 1.9 GB/file limit)."
+        required: false
+        default: "2"
+
+permissions:
+  contents: write
+
+jobs:
+  split:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      # Checkout FIRST (it cleans the workspace — the downloaded model must come after).
+      - uses: actions/checkout@v4
+
+      # The runner needs ~2x the model size on disk (source + parts). Drop the
+      # biggest preinstalled toolchains (~25 GB) — much faster than a full clean.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc || true
+          df -h /
+
+      - name: Download source gguf
+        run: |
+          set -euxo pipefail
+          URL="${{ github.event.inputs.gguf_url }}"
+          case "$URL" in https://*) ;; *) echo "::error::gguf_url must be https"; exit 1;; esac
+          sudo apt-get install -y -qq aria2 >/dev/null 2>&1 || true
+          if command -v aria2c >/dev/null; then
+            aria2c -x 8 -s 8 --file-allocation=none --summary-interval=15 -o model.gguf "$URL"
+          else
+            curl -fL --retry 5 --retry-delay 5 -o model.gguf "$URL"
+          fi
+          BYTES="$(stat -c %s model.gguf)"
+          test "$BYTES" -gt 1000000 || { echo "::error::downloaded file too small ($BYTES bytes) — not a real gguf"; exit 1; }
+          echo "downloaded model.gguf: $BYTES bytes"
+
+      - name: Slice into tensor-aligned parts
+        env:
+          MODEL_NAME: ${{ github.event.inputs.name }}
+          MIN_PARTS: ${{ github.event.inputs.parts }}
+          SOURCE_URL: ${{ github.event.inputs.gguf_url }}
+        run: |
+          set -euo pipefail
+          python3 scripts/nvpd_split.py
+          # The source file is no longer needed — free the disk before upload.
+          rm -f model.gguf
+          ls -la out/
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODEL_NAME: ${{ github.event.inputs.name }}
+        run: |
+          set -euo pipefail
+          SLUG="$(cat out/SLUG)"
+          TAG="nvpd-split-${SLUG}"
+          # Recreate cleanly so re-running with the same name replaces the release.
+          gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --title "NVP-D split · ${MODEL_NAME}" \
+            --notes "Découpe pré-calculée de ${MODEL_NAME} pour NVP-D. Chaque worker télécharge uniquement sa partie (part_<i>.bin) + le prélude." \
+            out/manifest.json out/prelude.bin out/part_*.bin
+          echo "Release: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"
